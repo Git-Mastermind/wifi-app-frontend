@@ -181,7 +181,7 @@ function App() {
       <main>
         <section className="hero">
           <div className="eyebrow"><span className="eyebrow-line" /> LOCAL CONNECTIONS, SHARED RESPONSIBLY</div>
-          <h1>Find your next<br /><span>connection.</span></h1>
+          <h1>Free crowd-sourced<br /><span>Wi-Fi.</span></h1>
           <p className="hero-copy">
             A community-powered directory of guest Wi-Fi networks shared with permission by local businesses.
           </p>
