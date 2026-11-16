@@ -10,6 +10,7 @@ async function apiRequest(path, options = {}) {
 
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
+    credentials: "include",
     headers: {
       "ngrok-skip-browser-warning": "true",
       ...(options.headers || {}),
@@ -93,9 +94,17 @@ function App() {
   const [submitting, setSubmitting] = useState(false);
   const [busyId, setBusyId] = useState(null);
 
+  const [showAuth, setShowAuth] = useState(false);
+  const [authMode, setAuthMode] = useState("login");
+  const [username, setUsername] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authSubmitting, setAuthSubmitting] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
+
   const loadWifis = useCallback(async () => {
     setLoading(true);
     setError("");
+
     try {
       const data = await apiRequest("/get-wifis");
       setWifis(Array.isArray(data) ? data : []);
@@ -106,9 +115,19 @@ function App() {
     }
   }, []);
 
+  const loadCurrentUser = useCallback(async () => {
+    try {
+      const data = await apiRequest("/me");
+      setCurrentUser(data.user);
+    } catch {
+      setCurrentUser(null);
+    }
+  }, []);
+
   useEffect(() => {
     loadWifis();
-  }, [loadWifis]);
+    loadCurrentUser();
+  }, [loadWifis, loadCurrentUser]);
 
   const filteredWifis = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -116,9 +135,76 @@ function App() {
     return wifis.filter((item) => (item.name || "").toLowerCase().includes(term));
   }, [wifis, query]);
 
+  function openAuth(mode) {
+    setAuthMode(mode);
+    setShowAuth(true);
+    setError("");
+    setNotice("");
+  }
+
+  async function submitAuth(event) {
+    event.preventDefault();
+
+    if (!username.trim() || !authPassword) {
+      setError("Enter a username and password.");
+      return;
+    }
+
+    setAuthSubmitting(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const endpoint = authMode === "signup" ? "/signup" : "/login";
+
+      const data = await apiRequest(
+        `${endpoint}?username=${encodeURIComponent(username.trim())}&password=${encodeURIComponent(authPassword)}`,
+        { method: "POST" }
+      );
+
+      if (authMode === "signup") {
+        setAuthMode("login");
+        setAuthPassword("");
+        setNotice("Account created. Log in to report a network.");
+      } else {
+        setCurrentUser(data.user);
+        setUsername("");
+        setAuthPassword("");
+        setShowAuth(false);
+        setNotice(`Logged in as ${data.user.username}.`);
+      }
+    } catch (err) {
+      setError(err.message || "Your account request could not be completed.");
+    } finally {
+      setAuthSubmitting(false);
+    }
+  }
+
+  async function logout() {
+    setError("");
+    setNotice("");
+
+    try {
+      await apiRequest("/logout", { method: "POST" });
+      setCurrentUser(null);
+      setNotice("You are logged out.");
+    } catch (err) {
+      setError(err.message || "Could not log out.");
+    }
+  }
+
   async function vote(id, action) {
+    if (action === "downvote" && !currentUser) {
+      setShowAuth(true);
+      setAuthMode("login");
+      setError("Log in before reporting a network.");
+      return;
+    }
+
     setBusyId(id);
     setNotice("");
+    setError("");
+
     try {
       await apiRequest(`/${action}?id=${encodeURIComponent(id)}`, { method: "POST" });
       setNotice(action === "upvote" ? "Thanks for confirming this entry!" : "Thanks for flagging this entry.");
@@ -132,10 +218,12 @@ function App() {
 
   async function submitEntry(event) {
     event.preventDefault();
+
     if (!authorized) {
       setError("Please confirm that the business has authorized sharing this guest Wi-Fi information.");
       return;
     }
+
     if (!ssid.trim() || !password.trim()) {
       setError("Enter both the network name and password.");
       return;
@@ -144,11 +232,13 @@ function App() {
     setSubmitting(true);
     setError("");
     setNotice("");
+
     try {
-      // The existing Flask API reads these values from request.args.
-      await apiRequest(`/new-entry?name=${encodeURIComponent(ssid.trim())}&password=${encodeURIComponent(password)}`, {
-        method: "POST",
-      });
+      await apiRequest(
+        `/new-entry?name=${encodeURIComponent(ssid.trim())}&password=${encodeURIComponent(password)}`,
+        { method: "POST" }
+      );
+
       setSsid("");
       setPassword("");
       setAuthorized(false);
@@ -169,10 +259,27 @@ function App() {
           <span className="brand-mark"><span>⌁</span></span>
           <span>opensignal<span className="brand-dot">.</span></span>
         </a>
+
         <div className="topbar-right">
           <span className="status-dot" />
           <span className="status-text">Community directory</span>
-          <button className="button button-primary top-submit" onClick={() => setShowForm((v) => !v)}>
+
+          {currentUser ? (
+            <>
+              <button className="button button-soft" type="button" onClick={() => setShowAuth((value) => !value)}>
+                {currentUser.username}
+              </button>
+              <button className="button button-soft" type="button" onClick={logout}>
+                Log out
+              </button>
+            </>
+          ) : (
+            <button className="button button-soft" type="button" onClick={() => openAuth("login")}>
+              Log in / Sign up
+            </button>
+          )}
+
+          <button className="button button-primary top-submit" onClick={() => setShowForm((value) => !value)}>
             <span>＋</span> Add network
           </button>
         </div>
@@ -185,6 +292,7 @@ function App() {
           <p className="hero-copy">
             A community-powered directory of guest Wi-Fi networks shared with permission by local businesses.
           </p>
+
           <div className="search-wrap">
             <span className="search-icon">⌕</span>
             <input
@@ -196,12 +304,80 @@ function App() {
             {query && <button className="clear-search" onClick={() => setQuery("")}>Clear</button>}
             <span className="search-shortcut">⌘ K</span>
           </div>
+
           <div className="hero-meta">
             <span><strong>{wifis.length}</strong> {wifis.length === 1 ? "network" : "networks"} listed</span>
             <span className="meta-separator">·</span>
             <span>Only business-authorized guest networks</span>
           </div>
         </section>
+
+        {showAuth && (
+          <section className="submit-panel">
+            <div className="panel-heading">
+              <div>
+                <div className="section-kicker">ACCOUNT</div>
+                <h2>{authMode === "login" ? "Welcome back" : "Create an account"}</h2>
+                <p>
+                  {authMode === "login"
+                    ? "Log in to report a network."
+                    : "Create an account to report networks once each."}
+                </p>
+              </div>
+              <button className="icon-close" onClick={() => setShowAuth(false)} aria-label="Close account form">×</button>
+            </div>
+
+            <form onSubmit={submitAuth} className="submit-form">
+              <label>
+                Username
+                <input
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  placeholder="Choose a username"
+                  minLength={3}
+                  maxLength={32}
+                  required
+                />
+              </label>
+
+              <label>
+                Password
+                <input
+                  type="password"
+                  value={authPassword}
+                  onChange={(event) => setAuthPassword(event.target.value)}
+                  placeholder="At least 8 characters"
+                  minLength={8}
+                  maxLength={128}
+                  required
+                />
+              </label>
+
+              <button className="button button-primary submit-form-button" disabled={authSubmitting}>
+                {authSubmitting
+                  ? "Please wait..."
+                  : authMode === "login"
+                    ? "Log in"
+                    : "Create account"}
+              </button>
+
+              <button
+                className="button button-soft"
+                type="button"
+                onClick={() => {
+                  setAuthMode(authMode === "login" ? "signup" : "login");
+                  setAuthPassword("");
+                  setError("");
+                  setNotice("");
+                }}
+              >
+                {authMode === "login"
+                  ? "Need an account? Sign up"
+                  : "Already have an account? Log in"}
+              </button>
+            </form>
+          </section>
+        )}
 
         {showForm && (
           <section className="submit-panel">
@@ -213,19 +389,23 @@ function App() {
               </div>
               <button className="icon-close" onClick={() => setShowForm(false)} aria-label="Close form">×</button>
             </div>
+
             <form onSubmit={submitEntry} className="submit-form">
               <label>
                 Wi-Fi network name
-                <input value={ssid} onChange={(e) => setSsid(e.target.value)} placeholder="e.g. Cafe_Guest" maxLength={255} required />
+                <input value={ssid} onChange={(event) => setSsid(event.target.value)} placeholder="e.g. Cafe_Guest" maxLength={255} required />
               </label>
+
               <label>
                 Guest Wi-Fi password
-                <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter the authorized guest password" maxLength={255} required />
+                <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter the authorized guest password" maxLength={255} required />
               </label>
+
               <label className="permission-check">
-                <input type="checkbox" checked={authorized} onChange={(e) => setAuthorized(e.target.checked)} />
+                <input type="checkbox" checked={authorized} onChange={(event) => setAuthorized(event.target.checked)} />
                 <span>I confirm this is a guest network and the business has authorized sharing these credentials.</span>
               </label>
+
               <button className="button button-primary submit-form-button" disabled={submitting}>
                 {submitting ? "Submitting..." : "Submit network"}
               </button>
