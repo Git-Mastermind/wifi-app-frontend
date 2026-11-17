@@ -8,11 +8,14 @@ async function apiRequest(path, options = {}) {
     throw new Error("API URL missing. Set VITE_API_BASE_URL in your .env file, then restart Vite.");
   }
 
+  const savedToken = window.localStorage.getItem("opensignal_token");
+
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
     credentials: "include",
     headers: {
       "ngrok-skip-browser-warning": "true",
+      ...(savedToken ? { Authorization: `Bearer ${savedToken}` } : {}),
       ...(options.headers || {}),
     },
   });
@@ -119,8 +122,10 @@ function App() {
     try {
       const data = await apiRequest("/me");
       setCurrentUser(data.user);
+      return data.user;
     } catch {
       setCurrentUser(null);
+      return null;
     }
   }, []);
 
@@ -167,11 +172,18 @@ function App() {
         setAuthPassword("");
         setNotice("Account created. Log in to report a network.");
       } else {
-        setCurrentUser(data.user);
+        if (!data.token) {
+          throw new Error("Login succeeded but the API did not return an authentication token.");
+        }
+        window.localStorage.setItem("opensignal_token", data.token);
+        const refreshedUser = await loadCurrentUser();
+        if (!refreshedUser) {
+          throw new Error("Login succeeded, but the API could not confirm your session. Please try again.");
+        }
         setUsername("");
         setAuthPassword("");
         setShowAuth(false);
-        setNotice(`Logged in as ${data.user.username}.`);
+        setNotice(`Logged in as ${refreshedUser.username}.`);
       }
     } catch (err) {
       setError(err.message || "Your account request could not be completed.");
@@ -186,6 +198,7 @@ function App() {
 
     try {
       await apiRequest("/logout", { method: "POST" });
+      window.localStorage.removeItem("opensignal_token");
       setCurrentUser(null);
       setNotice("You are logged out.");
     } catch (err) {
@@ -195,8 +208,7 @@ function App() {
 
   async function vote(id, action) {
     if (action === "downvote" && !currentUser) {
-      setShowAuth(true);
-      setAuthMode("login");
+      openAuth("login");
       setError("Log in before reporting a network.");
       return;
     }
@@ -313,70 +325,109 @@ function App() {
         </section>
 
         {showAuth && (
-          <section className="submit-panel">
-            <div className="panel-heading">
-              <div>
-                <div className="section-kicker">ACCOUNT</div>
-                <h2>{authMode === "login" ? "Welcome back" : "Create an account"}</h2>
-                <p>
-                  {authMode === "login"
-                    ? "Log in to report a network."
-                    : "Create an account to report networks once each."}
-                </p>
+          <div className="auth-overlay" onClick={() => setShowAuth(false)}>
+            <section
+              className="auth-modal"
+              onClick={(event) => event.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="auth-title"
+            >
+              <div className="panel-heading">
+                <div>
+                  <div className="section-kicker">ACCOUNT</div>
+                  <h2 id="auth-title">
+                    {authMode === "login" ? "Welcome back" : "Create an account"}
+                  </h2>
+                  <p>
+                    {authMode === "login"
+                      ? "Log in to report a network."
+                      : "Create an account to report networks once each."}
+                  </p>
+                </div>
+                <button
+                  className="icon-close"
+                  onClick={() => setShowAuth(false)}
+                  aria-label="Close account form"
+                  type="button"
+                >
+                  ×
+                </button>
               </div>
-              <button className="icon-close" onClick={() => setShowAuth(false)} aria-label="Close account form">×</button>
-            </div>
 
-            <form onSubmit={submitAuth} className="submit-form">
-              <label>
-                Username
-                <input
-                  value={username}
-                  onChange={(event) => setUsername(event.target.value)}
-                  placeholder="Choose a username"
-                  minLength={3}
-                  maxLength={32}
-                  required
-                />
-              </label>
+              {error && (
+                <div className="alert alert-error" role="alert">
+                  <span>!</span>
+                  {error}
+                  <button type="button" onClick={() => setError("")} aria-label="Dismiss">×</button>
+                </div>
+              )}
 
-              <label>
-                Password
-                <input
-                  type="password"
-                  value={authPassword}
-                  onChange={(event) => setAuthPassword(event.target.value)}
-                  placeholder="At least 8 characters"
-                  minLength={8}
-                  maxLength={128}
-                  required
-                />
-              </label>
+              {notice && (
+                <div className="alert alert-success" role="status">
+                  <span>✓</span>
+                  {notice}
+                  <button type="button" onClick={() => setNotice("")} aria-label="Dismiss">×</button>
+                </div>
+              )}
 
-              <button className="button button-primary submit-form-button" disabled={authSubmitting}>
-                {authSubmitting
-                  ? "Please wait..."
-                  : authMode === "login"
-                    ? "Log in"
-                    : "Create account"}
-              </button>
+              <form onSubmit={submitAuth} className="submit-form">
+                <label>
+                  Username
+                  <input
+                    value={username}
+                    onChange={(event) => setUsername(event.target.value)}
+                    placeholder="Choose a username"
+                    minLength={3}
+                    maxLength={32}
+                    autoComplete="username"
+                    required
+                  />
+                </label>
 
-              <button
-                className="button button-soft"
-                type="button"
-                onClick={() => {
-                  setAuthMode(authMode === "login" ? "signup" : "login");
-                  setAuthPassword("");
-                  setError("");
-                  setNotice("");
-                }}
-              >
-                {authMode === "login"
-                  ? "Need an account? Sign up"
-                  : "Already have an account? Log in"}
-              </button>
-            </form>
-          </section>
+                <label>
+                  Password
+                  <input
+                    type="password"
+                    value={authPassword}
+                    onChange={(event) => setAuthPassword(event.target.value)}
+                    placeholder="At least 8 characters"
+                    minLength={8}
+                    maxLength={128}
+                    autoComplete={authMode === "login" ? "current-password" : "new-password"}
+                    required
+                  />
+                </label>
+
+                <button
+                  className="button button-primary submit-form-button"
+                  disabled={authSubmitting}
+                  type="submit"
+                >
+                  {authSubmitting
+                    ? "Please wait..."
+                    : authMode === "login"
+                      ? "Log in"
+                      : "Create account"}
+                </button>
+
+                <button
+                  className="button button-soft"
+                  type="button"
+                  onClick={() => {
+                    setAuthMode(authMode === "login" ? "signup" : "login");
+                    setAuthPassword("");
+                    setError("");
+                    setNotice("");
+                  }}
+                >
+                  {authMode === "login"
+                    ? "Need an account? Sign up"
+                    : "Already have an account? Log in"}
+                </button>
+              </form>
+            </section>
+          </div>
         )}
 
         {showForm && (
