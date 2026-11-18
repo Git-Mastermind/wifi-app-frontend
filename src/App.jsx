@@ -48,6 +48,7 @@ function WifiCard({ wifi, onVote, busy }) {
       </div>
       <div className="network-name">{wifi.name || "Unnamed network"}</div>
       <div className="network-label">Wi-Fi network name (SSID)</div>
+      <div className="network-author">Posted by {wifi.submitted_by || "Community"}</div>
 
       <div className="password-row">
         <div>
@@ -96,6 +97,8 @@ function App() {
   const [authorized, setAuthorized] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [busyId, setBusyId] = useState(null);
+  const [pendingWifis, setPendingWifis] = useState([]);
+  const [moderationBusyId, setModerationBusyId] = useState(null);
 
   const [showAuth, setShowAuth] = useState(false);
   const [authMode, setAuthMode] = useState("login");
@@ -129,10 +132,27 @@ function App() {
     }
   }, []);
 
+  const loadPendingWifis = useCallback(async () => {
+    try {
+      const data = await apiRequest("/pending-wifis");
+      setPendingWifis(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setError(err.message || "Could not load submissions waiting for approval.");
+    }
+  }, []);
+
   useEffect(() => {
     loadWifis();
     loadCurrentUser();
   }, [loadWifis, loadCurrentUser]);
+
+  useEffect(() => {
+    if (currentUser?.is_admin) {
+      loadPendingWifis();
+    } else {
+      setPendingWifis([]);
+    }
+  }, [currentUser, loadPendingWifis]);
 
   const filteredWifis = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -231,6 +251,13 @@ function App() {
   async function submitEntry(event) {
     event.preventDefault();
 
+    if (!currentUser) {
+      setShowForm(false);
+      openAuth("login");
+      setError("Log in before adding a network.");
+      return;
+    }
+
     if (!authorized) {
       setError("Please confirm that the business has authorized sharing this guest Wi-Fi information.");
       return;
@@ -255,12 +282,28 @@ function App() {
       setPassword("");
       setAuthorized(false);
       setShowForm(false);
-      setNotice("Entry submitted. Thanks for contributing!");
+      setNotice("Entry submitted for approval. It will appear after review.");
       await loadWifis();
+      if (currentUser?.is_admin) await loadPendingWifis();
     } catch (err) {
       setError(err.message || "The entry could not be submitted.");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function moderateEntry(id, decision) {
+    setModerationBusyId(id);
+    setError("");
+    setNotice("");
+    try {
+      await apiRequest(`/${decision}-entry?id=${encodeURIComponent(id)}`, { method: "POST" });
+      setNotice(decision === "approve" ? "Entry approved and published." : "Entry rejected and removed.");
+      await Promise.all([loadPendingWifis(), loadWifis()]);
+    } catch (err) {
+      setError(err.message || "Could not update this submission.");
+    } finally {
+      setModerationBusyId(null);
     }
   }
 
@@ -291,7 +334,14 @@ function App() {
             </button>
           )}
 
-          <button className="button button-primary top-submit" onClick={() => setShowForm((value) => !value)}>
+          <button className="button button-primary top-submit" onClick={() => {
+            if (!currentUser) {
+              openAuth("login");
+              setError("Log in before adding a network.");
+              return;
+            }
+            setShowForm((value) => !value);
+          }}>
             <span>＋</span> Add network
           </button>
         </div>
@@ -441,6 +491,8 @@ function App() {
               <button className="icon-close" onClick={() => setShowForm(false)} aria-label="Close form">×</button>
             </div>
 
+            <p className="posting-as">Posting as <strong>{currentUser?.username}</strong></p>
+
             <form onSubmit={submitEntry} className="submit-form">
               <label>
                 Wi-Fi network name
@@ -461,6 +513,41 @@ function App() {
                 {submitting ? "Submitting..." : "Submit network"}
               </button>
             </form>
+          </section>
+        )}
+
+        {currentUser?.is_admin && (
+          <section className="submit-panel moderation-panel">
+            <div className="section-kicker">ADMIN REVIEW</div>
+            <div className="panel-heading">
+              <div>
+                <h2>Waiting for approval</h2>
+                <p>These entries are hidden from the public directory until approved.</p>
+              </div>
+              <span className="results-count">{pendingWifis.length} PENDING</span>
+            </div>
+            {pendingWifis.length === 0 ? (
+              <p className="moderation-empty">No submissions are waiting for review.</p>
+            ) : (
+              <div className="moderation-list">
+                {pendingWifis.map((wifi) => (
+                  <article className="moderation-item" key={wifi.id}>
+                    <div>
+                      <strong>{wifi.name || "Unnamed network"}</strong>
+                      <span>Submitted by {wifi.submitted_by || "Unknown user"}</span>
+                    </div>
+                    <div className="moderation-actions">
+                      <button className="button button-primary" type="button" disabled={moderationBusyId === wifi.id} onClick={() => moderateEntry(wifi.id, "approve")}>
+                        Approve
+                      </button>
+                      <button className="button button-soft" type="button" disabled={moderationBusyId === wifi.id} onClick={() => moderateEntry(wifi.id, "reject")}>
+                        Reject
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
           </section>
         )}
 
