@@ -198,5 +198,6 @@ footer { border-top: 1px solid #e5eae5; max-width: 1180px; margin: 0 auto; min-h
   align-items: flex-end;
   gap: 3px;
   color: #9aa39d;
+  font-size: 11px;
   text-align: right;
 }
