@@ -349,7 +349,7 @@ function App() {
 
       <main>
         <div className="service-notice" role="status">
-          Service notice: OpenSignal service will be paused Nov 23–Dec 9, 2026.
+          Service notice: Users may experience outages from 11/23 to 12/09, 2026.
         </div>
 
         <section className="hero">
