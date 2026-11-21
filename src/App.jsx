@@ -348,6 +348,10 @@ function App() {
       </header>
 
       <main>
+        <div className="service-notice" role="status">
+          Service notice: OpenSignal service will be paused Nov 23–Dec 9, 2026.
+        </div>
+
         <section className="hero">
           <div className="eyebrow"><span className="eyebrow-line" /> LOCAL CONNECTIONS, SHARED RESPONSIBLY</div>
           <h1>Local Wi-Fi<br /><span>unlocked.</span></h1>
@@ -606,6 +610,10 @@ function App() {
         <a className="brand footer-brand" href="#"><span className="brand-mark"><span>⌁</span></span><span>opensignal<span className="brand-dot">.</span></span></a>
         <span>Community-powered guest Wi-Fi directory</span>
         <span>Built with care <span className="footer-star">✳</span></span>
+        <div className="footer-credit">
+          <span>A creation of Eshan Jha</span>
+          <span>Tesla STEM High School</span>
+        </div>
       </footer>
     </div>
   );
